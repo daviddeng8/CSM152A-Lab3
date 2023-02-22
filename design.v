@@ -1,25 +1,26 @@
-	
-module stopwatch (	// Inputs
-					SEL, ADJ, RESET, PAUSE, clk,
-                    // outputs
-                    LED
+module stopwatch (
+// Inputs
+	btnS, // PAUSE
+	btnR, // RESET
+	sw, // sw<0>: SELECT, sw<1>: ADJUST
+	clk,
+// Outputs
+   seg,
+	an
 );
-  	input wire SEL; // 0: Min, 1: Sec
-  	input wire ADJ; // 0: Normal clock (1Hz), 1: 2Hz
-  	input wire RESET;
-  	input wire PAUSE;
-  	input wire clk;
-  	output wire [6:0] LED [3:0]; // 4 digits of a 7-seg display
-  
-  	initial begin
-      $strobe("john wick");
-    end
-
+	input [1:0]	 sw; // sw<0>: SELECT, sw<1>: ADJUST
+	input        btnS; // PAUSE
+   input        btnR; // RESET
+	
+  	input 		 clk;
+	
+	output reg [3:0] an; // anode signals of the 7-segment LED display
+   output reg [6:0] seg; // cathode patterns of the 7-segment LED display
   	
   	// Create 4 clocks
   	reg reg_clk = 0; 		// 1Hz
   	reg fast_clk = 0; 		// 2Hz
-  	reg display_clk = 0; 	// 50-700 Hz -> 500 Hz
+  	reg display_clk = 0; 	// 50-700 Hz -> 100 Hz
   	reg blink_clk = 0; 		// 5 Hz ( > 1Hz)
   	
     reg[5:0] seconds_counter = 0;
@@ -28,10 +29,10 @@ module stopwatch (	// Inputs
     
   	integer cycles = 0; // 32-bit
   	
-  	reg current_clk = reg_clk;
+  	reg current_clk;
 
   	
-  	always @ (posedge clk)
+  always @ (posedge clk) // clk = 100 mhz
     begin
 		cycles = cycles + 1;
       
@@ -50,15 +51,12 @@ module stopwatch (	// Inputs
           	blink_clk = ~blink_clk;
         end
       
-      	if (cycles % 1_000_000 == 0) // 100Hz display clock
-        begin
-          	display_clk = ~display_clk;
-        end
+      	display_clk = ~display_clk; // 100Hz display clock
       
-      	if (ADJ == 0) begin
+      if (sw[1] == 0) begin // SELECT 0
       		current_clk <= reg_clk;
     	end
-    	else begin
+    	else begin  // SELECT 1
       		current_clk <= fast_clk;
     	end
       	
@@ -77,98 +75,81 @@ module stopwatch (	// Inputs
           else begin
             seconds_counter <= seconds_counter + 1;  
           end
-          
-          
-          $strobe("minutes ctr: ", minutes_counter);
-          $strobe("seconds ctr: ", seconds_counter);
+                      $strobe("min: %0t || sec: %0t", minutes_counter, seconds_counter);
+      $strobe("an: %b || num: %0t", an, LED_BCD);
         end
      
-      	if (RESET) begin
+      	if (btnR) begin // If RESET
           seconds_counter <= 6'b000000;
           minutes_counter <= 6'b000000;
         end
       	
     end
-  	
-endmodule
+	 
+	 // Display
+	 
+	 reg [3:0] LED_BCD;
+   reg [1:0] LED_activating_counter = 2'b00; 
 
-
-
-
-
-module counter(input clk,
-               input rst,
-               output reg[5:0] seconds_counter,
-               output reg[5:0] minutes_counter);
-  
-  reg[5:0] cur_secs;
-  reg[5:0] cur_mins;
-  
-  // for the seconds
-  always @ (posedge clk) begin
-    if (rst) 
-    begin
-      cur_secs <= 6'b000000;
-      cur_mins <= 6'b000000;
-    end
-    else
-      cur_secs <= cur_secs + 1;
-    if (cur_secs == 6'b111100)  // 60
-    begin
-      cur_secs = 6'b000000;
-      if (cur_mins == 6'b001100) // 12
-        cur_mins <= 0;
-      else 
-      	cur_mins <= cur_mins + 1;
-      
+    always @(display_clk)
+    begin 
+      if(btnR==1)
+            LED_activating_counter <= 2'b00;
+        else
+            LED_activating_counter <= LED_activating_counter + 1;
     end 
-    
-    assign seconds_counter = cur_secs;
-    assign minutes_counter = cur_mins;
- 
-    
-  end
-      
-endmodule
-    
-
-
-
-    
-module stopwatch_counter (
-  input clk,
-  input reset,
-  output reg [3:0] seconds_out,
-  output reg [3:0] minutes_out
-);
-
-reg [3:0] seconds_reg, minutes_reg;
-reg [3:0] seconds_next, minutes_next;
-
-// Seconds counter
-always @ (posedge clk, posedge reset) begin
-  if (reset) begin
-    seconds_reg <= 4'b0;
-  end else if (seconds_reg == 4'b1001) begin // if seconds count is 9
-    seconds_next <= 4'b0;
-    minutes_next <= minutes_reg + 4'b0001; // increment minutes
-  end else begin
-    seconds_next <= seconds_reg + 4'b0001;
-  end
+				 
+	 // anode activating signals for 4 LEDs
+    // decoder to generate anode signals 
+    always @(*)
+    begin
+        case(LED_activating_counter)
+        2'b00: begin
+            an = 4'b0111; 
+            // activate LED1 and Deactivate LED2, LED3, LED4
+            LED_BCD = minutes_counter/10;
+            // the first hex-digit of the 16-bit number
+             end
+        2'b01: begin
+            an = 4'b1011; 
+            // activate LED2 and Deactivate LED1, LED3, LED4
+            LED_BCD = minutes_counter%10;
+            // the second hex-digit of the 16-bit number
+                end
+        2'b10: begin
+            an = 4'b1101; 
+            // activate LED3 and Deactivate LED2, LED1, LED4
+            LED_BCD = seconds_counter/10;
+             // the third hex-digit of the 16-bit number
+              end
+        2'b11: begin
+            an = 4'b1110; 
+            // activate LED4 and Deactivate LED2, LED3, LED1
+            LED_BCD = seconds_counter%10;
+             // the fourth hex-digit of the 16-bit number 
+               end
+        endcase
+    end
+	 
+	 reg[6:0] LED_out;
+// Cathode patterns of the 7-segment LED display 
+always @(*)
+begin
+ case(LED_BCD)
+ 4'b0000: seg = 7'b0000001; // "0"  
+ 4'b0001: seg = 7'b1001111; // "1" 
+ 4'b0010: seg = 7'b0010010; // "2" 
+ 4'b0011: seg = 7'b0000110; // "3" 
+ 4'b0100: seg = 7'b1001100; // "4" 
+ 4'b0101: seg = 7'b0100100; // "5" 
+ 4'b0110: seg = 7'b0100000; // "6" 
+ 4'b0111: seg = 7'b0001111; // "7" 
+ 4'b1000: seg = 7'b0000000; // "8"  
+ 4'b1001: seg = 7'b0000100; // "9" 
+ default: seg = 7'b0000001; // "0"
+ endcase
 end
 
   
-  
-// Minutes counter
-always @ (posedge clk, posedge reset) begin
-  if (reset) begin
-    minutes_reg <= 4'b0;
-  end else begin
-    minutes_reg <= minutes_next;
-  end
-end
-
-assign seconds_out = seconds_reg;
-assign minutes_out = minutes_reg;
-
+  	
 endmodule
